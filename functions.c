@@ -3,7 +3,154 @@
 #include <memory.h>
 #include "functions.h"
 
-#define MAX_PINYIN_LEN 6
+// delete the back whitespace
+char *right_trim(char *str)
+{
+    char *endp;
+    size_t len = strlen(str);
+ 
+    if(len == 0) return str;
+ 
+    endp = str + strlen(str) - 1;
+    while(*endp == ' ') endp--;
+    *(endp + 1) = '\0';
+ 
+    return str;
+}
+
+void chars_to_pinyin(char *in, char *out, char *dict)
+{
+    int start = 19968;
+    char* words = in;
+    char buf[MAX_PINYIN_LEN+1];
+    while(*words != '\0')
+    {
+        memset(buf, 0, MAX_PINYIN_LEN+1);
+        if((*words >> 7) == 0)
+        {
+            strncat(out, words, 1);
+            words++;
+        }
+        else if((*words & 0xE0) == 0xC0)
+        {
+            strncat(out, words, 2);
+            words += 2;
+        }
+        else if((*words & 0xF0) == 0xE0)
+        {
+            if(*(words + 1) != '\0' && *(words + 2) != '\0')
+            {
+                int tmp = (((int)(*words & 0x0F)) << 12) | (((int)(*(words+1) & 0x3F)) << 6) | (*(words+2) & 0x3F);
+                if(tmp > 19967 && tmp < 40870)
+                {
+                    int offset = (tmp - start) * MAX_PINYIN_LEN;
+                    strncpy(buf, dict + offset, MAX_PINYIN_LEN);
+                    strncat(out, buf, MAX_PINYIN_LEN);
+                    right_trim(out);//remove white spaces at the end
+                    words += 3;
+                }
+                else
+                {
+                    strncat(out, words, 3);
+                    words += 3;
+                }
+            }
+            else
+            {
+                strncat(out, words, 3);
+                words += 3;
+            }
+        }
+        else if((*words & 0xF8) == 0xF0)
+        {
+            strncat(out, words, 4);
+            words += 4;
+        }
+        else if((*words & 0xFC) == 0xF8)
+        {
+            strncat(out, words, 5);
+            words += 5;
+        }
+        else if((*words & 0xFE) == 0xFC)
+        {
+            strncat(out, words, 6);
+            words += 6;
+        }
+        else
+        {
+            strncat(out, words, 1);
+            words++;
+            break;
+        }
+    }
+}
+
+void get_to_pinyin(sds in, sds out, char *dict)
+{
+    int start = 19968;
+    char* words = in;
+    char buf[MAX_PINYIN_LEN+1];
+    while(*words != '\0')
+    {
+        memset(buf, 0, MAX_PINYIN_LEN+1);
+        if((*words >> 7) == 0)
+        {
+            sdscatlen(out, words, 1);
+            words++;
+        }
+        else if((*words & 0xE0) == 0xC0)
+        {
+            sdscatlen(out, words, 2);
+            words += 2;
+        }
+        else if((*words & 0xF0) == 0xE0)
+        {
+            if(*(words + 1) != '\0' && *(words + 2) != '\0')
+            {
+                int tmp = (((int)(*words & 0x0F)) << 12) | (((int)(*(words+1) & 0x3F)) << 6) | (*(words+2) & 0x3F);
+                if(tmp > 19967 && tmp < 40870)
+                {
+                    int offset = (tmp - start) * MAX_PINYIN_LEN;
+                    strncpy(buf, dict + offset, MAX_PINYIN_LEN);
+                    sdscatlen(out, buf, MAX_PINYIN_LEN);
+                    sdstrim(out, " ");  //remove white spaces at the first and at the end
+                    words += 3;
+                }
+                else
+                {
+                    sdscatlen(out, words, 3);
+                    words += 3;
+                }
+            }
+            else
+            {
+                sdscatlen(out, words, 3);
+                words += 3;
+            }
+        }
+        else if((*words & 0xF8) == 0xF0)
+        {
+            sdscatlen(out, words, 4);
+            words += 4;
+        }
+        else if((*words & 0xFC) == 0xF8)
+        {
+            sdscatlen(out, words, 5);
+            words += 5;
+        }
+        else if((*words & 0xFE) == 0xFC)
+        {
+            sdscatlen(out, words, 6);
+            words += 6;
+        }
+        else
+        {
+            sdscatlen(out, words, 1);
+            words++;
+            break;
+        }
+    }
+}
 
 void utf8_to_pinyin(sds in, sds out, FILE *fp)
 {
@@ -76,15 +223,15 @@ void utf8_to_pinyin(sds in, sds out, FILE *fp)
 int is_text_utf8(const char* str, long length)
 {
     int i;
-    int nBytes=0;//UFT8¿ÉÓÃ1-6¸ö×Ö½Ú±àÂë,ASCIIÓÃÒ»¸ö×Ö½Ú
+    int nBytes=0;//UFT8å¯ç”¨1-6ä¸ªå­—èŠ‚ç¼–ç ,ASCIIç”¨ä¸€ä¸ªå­—èŠ‚
     unsigned char chr;
-    bool bAllAscii=true; //Èç¹ûÈ«²¿¶¼ÊÇASCII, ËµÃ÷²»ÊÇUTF-8
+    bool bAllAscii=true; //å¦‚æœå…¨éƒ¨éƒ½æ˜¯ASCII, è¯´æ˜ä¸æ˜¯UTF-8
     for(i=0; i<length; i++)
     {
         chr= *(str+i);
-        if( (chr&0x80) != 0 ) // ÅĞ¶ÏÊÇ·ñASCII±àÂë,Èç¹û²»ÊÇ,ËµÃ÷ÓĞ¿ÉÄÜÊÇUTF-8,ASCIIÓÃ7Î»±àÂë,µ«ÓÃÒ»¸ö×Ö½Ú´æ,×î¸ßÎ»±ê¼ÇÎª0,o0xxxxxxx
+        if( (chr&0x80) != 0 ) // åˆ¤æ–­æ˜¯å¦ASCIIç¼–ç ,å¦‚æœä¸æ˜¯,è¯´æ˜æœ‰å¯èƒ½æ˜¯UTF-8,ASCIIç”¨7ä½ç¼–ç ,ä½†ç”¨ä¸€ä¸ªå­—èŠ‚å­˜,æœ€é«˜ä½æ ‡è®°ä¸º0,o0xxxxxxx
             bAllAscii= false;
-        if(nBytes==0) //Èç¹û²»ÊÇASCIIÂë,Ó¦¸ÃÊÇ¶à×Ö½Ú·û,¼ÆËã×Ö½ÚÊı
+        if(nBytes==0) //å¦‚æœä¸æ˜¯ASCIIç ,åº”è¯¥æ˜¯å¤šå­—èŠ‚ç¬¦,è®¡ç®—å­—èŠ‚æ•°
         {
             if(chr>=0x80)
             {
@@ -105,7 +252,7 @@ int is_text_utf8(const char* str, long length)
                 nBytes--;
             }
         }
-        else //¶à×Ö½Ú·ûµÄ·ÇÊ××Ö½Ú,Ó¦Îª 10xxxxxx
+        else //å¤šå­—èŠ‚ç¬¦çš„éé¦–å­—èŠ‚,åº”ä¸º 10xxxxxx
         {
             if( (chr&0xC0) != 0x80 )
             {
@@ -114,12 +261,12 @@ int is_text_utf8(const char* str, long length)
             nBytes--;
         }
     }
-    if( nBytes > 0 ) //Î¥·´¹æÔò
+    if( nBytes > 0 ) //è¿åè§„åˆ™
     {
         return false;
     }
 
-    if( bAllAscii ) //Èç¹ûÈ«²¿¶¼ÊÇASCII, ËµÃ÷²»ÊÇUTF-8
+    if( bAllAscii ) //å¦‚æœå…¨éƒ¨éƒ½æ˜¯ASCII, è¯´æ˜ä¸æ˜¯UTF-8
     {
         return false;
     }
